@@ -1,24 +1,80 @@
-import sqlite3
+from flask import Flask, jsonify
+import mysql.connector
+from mysql.connector import Error
 
-# 1. Conectar a la base de datos SQLite
-conexion = sqlite3.connect('ropauba.db')
-cursor = conexion.cursor()
+app = Flask(__name__)
 
-# 2. Configurar el puerto serie (ajusta 'COM3' al puerto adecuado en tu sistema)
-ser = serial.Serial('8080', 9600)  # Cambia COM3 según tu puerto (ej: COM4, COM5)
-time.sleep(2)  # Esperar para asegurar que el puerto esté listo
+# Ruta para mostrar todos los usuarios
+@app.route('/usuarios')
+def mostrar_Usuarios():
+    try:
+        # Conexión a la base de datos
+        conexion = mysql.connector.connect(
+            host="10.9.120.5",  # Cambia por la IP de tu servidor
+            port=3306,  # Puerto de MySQL
+            user="ropauba",  # Usuario
+            password="ropauba111",  # Contraseña
+            database="ropauba"  # Base de datos
+        )
 
-# 3. Leer los datos de la tabla
-cursor.execute('SELECT * FROM productos')
-productos = cursor.fetchall()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("SELECT * FROM Usuarios")
+            resultados = cursor.fetchall()
 
-# 4. Enviar los datos por el puerto serie
-for producto in productos:
-    mensaje = f'ID: {producto[0]}, Nombre: {producto[1]}, Precio: {producto[2]}, Cantidad: {producto[3]}\n'
-    ser.write(mensaje.encode())  # Convertir a bytes para enviar por el puerto serie
-    time.sleep(1)  # Pausa de 1 segundo entre envíos
+            # Cerrar el cursor y la conexión
+            cursor.close()
+            conexion.close()
 
-# 5. Cerrar la conexión de la base de datos y el puerto serie
-cursor.close()
-conexion.close()
-ser.close()
+            # Si hay resultados, devolverlos como JSON
+            if resultados:
+                return jsonify(resultados)
+            else:
+                return "No hay usuarios que mostrar", 200
+
+    except Error as e:
+        # Devolver mensaje de error si falla la conexión
+        return f"Error al conectar a la base de datos: {e}", 500
+
+    # Si algo falla inesperadamente, devolvemos un mensaje genérico
+    return "Error inesperado", 500
+
+# Ruta para mostrar detalles de un usuario específico por su ID
+@app.route('/usuarios/<int:id>')
+def detalles_usuario(id):
+    try:
+        # Conexión a la base de datos
+        conexion = mysql.connector.connect(
+            host="10.9.120.5",  # Cambia por la IP de tu servidor
+            port=3306,  # Puerto de MySQL
+            user="ropauba",  # Usuario
+            password="ropauba111",  # Contraseña
+            database="ropauba"  # Base de datos
+        )
+
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            # Consulta SQL para obtener los detalles de un usuario específico
+            cursor.execute("SELECT * FROM Usuarios WHERE id = %s", (id,))
+            resultado = cursor.fetchone()
+
+            # Cerrar el cursor y la conexión
+            cursor.close()
+            conexion.close()
+
+            # Si se encuentra el usuario, devolver los detalles como JSON
+            if resultado:
+                return jsonify(resultado)
+            else:
+                return f"No se encontró el usuario con ID {id}", 404
+
+    except Error as e:
+        # Devolver mensaje de error si falla la conexión
+        return f"Error al conectar a la base de datos: {e}", 500
+
+    # Si algo falla inesperadamente, devolvemos un mensaje genérico
+    return "Error inesperado", 500
+
+# Ejecutar la aplicación Flask
+if __name__ == '__main__':
+    app.run(debug=True)
