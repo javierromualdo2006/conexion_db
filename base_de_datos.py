@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import mysql.connector
 from mysql.connector import Error
 from datetime import timedelta
@@ -15,35 +15,57 @@ def conectar_bd():
         database="ropauba"  # Base de datos
     )
 
-# Función para convertir los resultados a un formato JSON serializable
-def convertir_a_serializable(data):
+# Función para convertir los resultados a un formato JSON serializable con nombres de columnas
+def convertir_a_serializable(cursor, data):
+    columnas = [desc[0] for desc in cursor.description]  # Obtener los nombres de las columnas
     serializable_data = []
     for item in data:
-        serializable_item = []
-        for value in item:
+        serializable_item = {}
+        for col_name, value in zip(columnas, item):
             if isinstance(value, timedelta):
                 # Convertir timedelta a segundos
-                serializable_item.append(value.total_seconds())
+                serializable_item[col_name] = value.total_seconds()
             else:
-                serializable_item.append(value)
+                serializable_item[col_name] = value
         serializable_data.append(serializable_item)
     return serializable_data
 
-# Ruta para ver todos los registros de una tabla específica
+# Ruta para ver todos los registros de una tabla específica con paginación
 def obtener_todos_los_registros(tabla):
     try:
+        page = request.args.get('page', 1, type=int)  # Obtener número de página, por defecto es 1
+        page_size = request.args.get('page_size', 12, type=int)  # Tamaño de página, por defecto 10
+        offset = (page - 1) * page_size  # Calcular el offset
+
         conexion = conectar_bd()
         if conexion.is_connected():
             cursor = conexion.cursor()
-            cursor.execute(f"SELECT * FROM {tabla}")
+
+            # Consulta para obtener los registros con paginación
+            cursor.execute(f"SELECT * FROM {tabla} LIMIT %s OFFSET %s", (page_size, offset))
             resultados = cursor.fetchall()
-            cursor.close()
-            conexion.close()
+
+            # Consulta para contar el número total de registros en la tabla
+            cursor.execute(f"SELECT COUNT(*) FROM {tabla}")
+            total_registros = cursor.fetchone()[0]  # Total de registros en la tabla
+
             if resultados:
                 # Convertir los resultados a un formato JSON serializable
-                serializable_resultados = convertir_a_serializable(resultados)
-                return jsonify(serializable_resultados)
+                serializable_resultados = convertir_a_serializable(cursor, resultados)
+                cursor.close()
+                conexion.close()
+
+                # Devolver los datos paginados y metadatos adicionales como página, tamaño y total
+                return jsonify({
+                    'page': page,
+                    'page_size': page_size,
+                    'total_registros': total_registros,
+                    'total_paginas': (total_registros + page_size - 1) // page_size,  # Calcular total de páginas
+                    'data': serializable_resultados
+                })
             else:
+                cursor.close()
+                conexion.close()
                 return f"No hay registros en la tabla {tabla}", 200
     except Error as e:
         return f"Error al conectar a la base de datos: {e}", 500
@@ -57,20 +79,22 @@ def obtener_detalles_por_id(tabla, id):
             cursor = conexion.cursor()
             cursor.execute(f"SELECT * FROM {tabla} WHERE id = %s", (id,))
             resultado = cursor.fetchone()
-            cursor.close()
-            conexion.close()
             if resultado:
                 # Convertir el resultado a un formato JSON serializable
-                serializable_resultado = convertir_a_serializable([resultado])[0]
+                serializable_resultado = convertir_a_serializable(cursor, [resultado])[0]
+                cursor.close()
+                conexion.close()
                 return jsonify(serializable_resultado)
             else:
+                cursor.close()
+                conexion.close()
                 return f"No se encontró el registro con ID {id} en la tabla {tabla}", 404
     except Error as e:
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
 
 
-# Rutas para cada tabla
+# Rutas para cada tabla con paginación
 @app.route('/compras')
 def mostrar_compras():
     return obtener_todos_los_registros('Compras')
