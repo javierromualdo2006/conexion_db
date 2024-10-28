@@ -93,7 +93,6 @@ def obtener_detalles_por_id(tabla, id):
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
 
-
 # Rutas para cada tabla con paginación
 @app.route('/compras')
 def mostrar_compras():
@@ -150,6 +149,155 @@ def mostrar_usuarios():
 @app.route('/usuarios/<int:id>')
 def detalles_usuarios(id):
     return obtener_detalles_por_id('Usuarios', id)
+
+
+# Función para verificar si un usuario es administrador
+def es_administrador(user_id):
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("SELECT rol FROM Usuarios WHERE id = %s", (user_id,))
+            resultado = cursor.fetchone()
+            cursor.close()
+            conexion.close()
+
+            # Suponemos que el rol 'administrador' está identificado como 'admin' en la columna `rol`
+            if resultado and resultado[0] == 'admin':
+                return True
+    except Error as e:
+        print(f"Error al verificar el rol: {e}")
+    return False
+
+# Ruta para eliminar un usuario
+@app.route('/usuarios/<int:id>', methods=['DELETE'])
+def eliminar_usuario(id):
+    # Obtener el user_id del encabezado de la solicitud
+    user_id = request.headers.get('user_id')
+
+    # Validar que user_id se haya enviado en los encabezados
+    if not user_id:
+        return jsonify({'error': 'Se requiere autenticación'}), 401
+
+    # Verificar si el usuario es administrador
+    if not es_administrador(user_id):
+        # Si el usuario no es administrador, solo puede eliminar su propia cuenta
+        if int(user_id) != id:
+            return jsonify({'error': 'Acceso denegado: solo puedes eliminar tu propia cuenta'}), 403
+
+    # Realizar la eliminación
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("DELETE FROM Usuarios WHERE id = %s", (id,))
+            conexion.commit()
+            filas_afectadas = cursor.rowcount
+            cursor.close()
+            conexion.close()
+
+            if filas_afectadas > 0:
+                return jsonify({'mensaje': 'Usuario eliminado con éxito'}), 200
+            else:
+                return f"No se encontró el usuario con ID {id}", 404
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
+# Ruta para eliminar una publicación, solo accesible para administradores
+@app.route('/publicaciones/<int:id>', methods=['DELETE'])
+def eliminar_publicacion(id):
+    # Obtener el user_id del encabezado de la solicitud para verificar su rol
+    user_id = request.headers.get('user_id')
+    if not user_id or not es_administrador(user_id):
+        return jsonify({'error': 'Acceso denegado: se requiere rol de administrador'}), 403
+
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("DELETE FROM Publicaciones WHERE id = %s", (id,))
+            conexion.commit()
+            filas_afectadas = cursor.rowcount
+            cursor.close()
+            conexion.close()
+
+            if filas_afectadas > 0:
+                return jsonify({'mensaje': 'Publicación eliminada con éxito'}), 200
+            else:
+                return f"No se encontró la publicación con ID {id}", 404
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
+# Ruta para crear un usuario en la tabla Usuarios, verificando que el correo no exista
+@app.route('/usuarios', methods=['POST'])
+def crear_usuario():
+    datos = request.json
+    nombre = datos.get('nombre')
+    correo = datos.get('correo')
+    contraseña = datos.get('contraseña')
+
+    if not (nombre and correo and contraseña):
+        return jsonify({'error': 'Faltan datos para crear el usuario'}), 400
+
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+
+            # Verificar si el correo ya existe
+            cursor.execute("SELECT id FROM Usuarios WHERE correo = %s", (correo,))
+            usuario_existente = cursor.fetchone()
+            
+            if usuario_existente:
+                cursor.close()
+                conexion.close()
+                return jsonify({'error': 'El correo ya está en uso'}), 409
+
+            # Si el correo no existe, crear el usuario
+            cursor.execute(
+                "INSERT INTO Usuarios (nombre, correo, contraseña) VALUES (%s, %s, %s)",
+                (nombre, correo, contraseña)
+            )
+            conexion.commit()
+            nuevo_id = cursor.lastrowid
+            cursor.close()
+            conexion.close()
+            return jsonify({'mensaje': 'Usuario creado con éxito', 'id': nuevo_id}), 201
+    except Error as e:
+        return jsonify({'error': f"Error al conectar a la base de datos: {e}"}), 500
+    return jsonify({'error': 'Error inesperado'}), 500
+
+# Rutas para agregar registros en la tabla Publicaciones
+@app.route('/publicaciones', methods=['POST'])
+def crear_publicacion():
+    datos = request.json
+    titulo = datos.get('titulo')
+    contenido = datos.get('contenido')
+    autor_id = datos.get('autor_id')
+
+    if not (titulo and contenido and autor_id):
+        return "Faltan datos para crear la publicación", 400
+
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute(
+                "INSERT INTO Publicaciones (titulo, contenido, autor_id) VALUES (%s, %s, %s)",
+                (titulo, contenido, autor_id)
+            )
+            conexion.commit()
+            nueva_id = cursor.lastrowid
+            cursor.close()
+            conexion.close()
+            return jsonify({'mensaje': 'Publicación creada con éxito', 'id': nueva_id}), 201
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
+
 
 # Ejecutar la aplicación Flask
 if __name__ == '__main__':
