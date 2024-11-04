@@ -15,10 +15,11 @@ def conectar_bd():
         database="ropauba"  # Base de datos
     )
 
-# Función para convertir los resultados a un formato JSON serializable con nombres de columnas
+# Función para convertir los resultados a un formato JSON serializable
 def convertir_a_serializable(cursor, data):
     columnas = [desc[0] for desc in cursor.description]  # Obtener los nombres de las columnas
     serializable_data = []
+    
     for item in data:
         serializable_item = {}
         for col_name, value in zip(columnas, item):
@@ -28,12 +29,28 @@ def convertir_a_serializable(cursor, data):
             else:
                 serializable_item[col_name] = value
         serializable_data.append(serializable_item)
+    
     return serializable_data
 
-# Lista de tablas que requieren paginación
-tablas_con_paginacion = ['Publicaciones']
+# Función para verificar si un usuario es administrador
+def es_administrador(user_id):
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("SELECT rol FROM Usuarios WHERE id = %s", (user_id,))
+            resultado = cursor.fetchone()
+            cursor.close()
+            conexion.close()
 
-# Ruta para ver todos los registros de una tabla específica con paginación
+            # Suponemos que el rol 'administrador' está identificado como 'admin' en la columna `rol`
+            if resultado and resultado[0] == 'admin':
+                return True
+    except Error as e:
+        print(f"Error al verificar el rol: {e}")
+    return False
+
+# Función para obtener registros con paginación
 def obtener_todos_los_registros(tabla):
     try:
         page = request.args.get('page', 1, type=int)  # Obtener número de página, por defecto es 1
@@ -59,7 +76,7 @@ def obtener_todos_los_registros(tabla):
                     cursor.close()
                     conexion.close()
 
-                    # Devolver los datos paginados y metadatos adicionales como página, tamaño y total
+                    # Devolver los datos paginados y metadatos adicionales
                     return jsonify({
                         'page': page,
                         'page_size': page_size,
@@ -84,7 +101,7 @@ def obtener_todos_los_registros(tabla):
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
 
-# Ruta para ver detalles de un registro específico por ID
+# Función para obtener detalles por ID
 def obtener_detalles_por_id(tabla, id):
     try:
         conexion = conectar_bd()
@@ -106,7 +123,64 @@ def obtener_detalles_por_id(tabla, id):
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
 
+# Ruta para eliminar un usuario
+@app.route('/usuarios/<int:id>', methods=['DELETE'])
+def eliminar_usuario(id):
+    user_id = request.headers.get('user_id')
+
+    if not user_id:
+        return jsonify({'error': 'Se requiere autenticación'}), 401
+
+    if not es_administrador(user_id):
+        if int(user_id) != id:
+            return jsonify({'error': 'Acceso denegado: solo puedes eliminar tu propia cuenta'}), 403
+
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("DELETE FROM Usuarios WHERE id = %s", (id,))
+            conexion.commit()
+            filas_afectadas = cursor.rowcount
+            cursor.close()
+            conexion.close()
+
+            if filas_afectadas > 0:
+                return jsonify({'mensaje': 'Usuario eliminado con éxito'}), 200
+            else:
+                return f"No se encontró el usuario con ID {id}", 404
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
+# Ruta para eliminar una publicación, solo accesible para administradores
+@app.route('/publicaciones/<int:id>', methods=['DELETE'])
+def eliminar_publicacion(id):
+    user_id = request.headers.get('user_id')
+    if not user_id or not es_administrador(user_id):
+        return jsonify({'error': 'Acceso denegado: se requiere rol de administrador'}), 403
+
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("DELETE FROM Publicaciones WHERE id = %s", (id,))
+            conexion.commit()
+            filas_afectadas = cursor.rowcount
+            cursor.close()
+            conexion.close()
+
+            if filas_afectadas > 0:
+                return jsonify({'mensaje': 'Publicación eliminada con éxito'}), 200
+            else:
+                return f"No se encontró la publicación con ID {id}", 404
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
 # Rutas para cada tabla con paginación
+tablas_con_paginacion = ['Publicaciones']
+
 @app.route('/compras')
 def mostrar_compras():
     return obtener_todos_los_registros('Compras')
@@ -162,85 +236,6 @@ def mostrar_usuarios():
 @app.route('/usuarios/<int:id>')
 def detalles_usuarios(id):
     return obtener_detalles_por_id('Usuarios', id)
-
-# Función para verificar si un usuario es administrador
-def es_administrador(user_id):
-    try:
-        conexion = conectar_bd()
-        if conexion.is_connected():
-            cursor = conexion.cursor()
-            cursor.execute("SELECT rol FROM Usuarios WHERE id = %s", (user_id,))
-            resultado = cursor.fetchone()
-            cursor.close()
-            conexion.close()
-
-            # Suponemos que el rol 'administrador' está identificado como 'admin' en la columna `rol`
-            if resultado and resultado[0] == 'admin':
-                return True
-    except Error as e:
-        print(f"Error al verificar el rol: {e}")
-    return False
-
-# Ruta para eliminar un usuario
-@app.route('/usuarios/<int:id>', methods=['DELETE'])
-def eliminar_usuario(id):
-    # Obtener el user_id del encabezado de la solicitud
-    user_id = request.headers.get('user_id')
-
-    # Validar que user_id se haya enviado en los encabezados
-    if not user_id:
-        return jsonify({'error': 'Se requiere autenticación'}), 401
-
-    # Verificar si el usuario es administrador
-    if not es_administrador(user_id):
-        # Si el usuario no es administrador, solo puede eliminar su propia cuenta
-        if int(user_id) != id:
-            return jsonify({'error': 'Acceso denegado: solo puedes eliminar tu propia cuenta'}), 403
-
-    # Realizar la eliminación
-    try:
-        conexion = conectar_bd()
-        if conexion.is_connected():
-            cursor = conexion.cursor()
-            cursor.execute("DELETE FROM Usuarios WHERE id = %s", (id,))
-            conexion.commit()
-            filas_afectadas = cursor.rowcount
-            cursor.close()
-            conexion.close()
-
-            if filas_afectadas > 0:
-                return jsonify({'mensaje': 'Usuario eliminado con éxito'}), 200
-            else:
-                return f"No se encontró el usuario con ID {id}", 404
-    except Error as e:
-        return f"Error al conectar a la base de datos: {e}", 500
-    return "Error inesperado", 500
-
-# Ruta para eliminar una publicación, solo accesible para administradores
-@app.route('/publicaciones/<int:id>', methods=['DELETE'])
-def eliminar_publicacion(id):
-    # Obtener el user_id del encabezado de la solicitud para verificar su rol
-    user_id = request.headers.get('user_id')
-    if not user_id or not es_administrador(user_id):
-        return jsonify({'error': 'Acceso denegado: se requiere rol de administrador'}), 403
-
-    try:
-        conexion = conectar_bd()
-        if conexion.is_connected():
-            cursor = conexion.cursor()
-            cursor.execute("DELETE FROM Publicaciones WHERE id = %s", (id,))
-            conexion.commit()
-            filas_afectadas = cursor.rowcount
-            cursor.close()
-            conexion.close()
-
-            if filas_afectadas > 0:
-                return jsonify({'mensaje': 'Publicación eliminada con éxito'}), 200
-            else:
-                return f"No se encontró la publicación con ID {id}", 404
-    except Error as e:
-        return f"Error al conectar a la base de datos: {e}", 500
-    return "Error inesperado", 500
 
 if __name__ == '__main__':
     app.run(debug=True)
