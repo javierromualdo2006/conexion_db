@@ -30,11 +30,14 @@ def convertir_a_serializable(cursor, data):
         serializable_data.append(serializable_item)
     return serializable_data
 
+# Lista de tablas que requieren paginación
+tablas_con_paginacion = ['Publicaciones']
+
 # Ruta para ver todos los registros de una tabla específica con paginación
 def obtener_todos_los_registros(tabla):
     try:
         page = request.args.get('page', 1, type=int)  # Obtener número de página, por defecto es 1
-        page_size = request.args.get('page_size', 12, type=int)  # Tamaño de página, por defecto 10
+        page_size = request.args.get('page_size', 12, type=int)  # Tamaño de página, por defecto 12
         offset = (page - 1) * page_size  # Calcular el offset
 
         conexion = conectar_bd()
@@ -42,31 +45,41 @@ def obtener_todos_los_registros(tabla):
             cursor = conexion.cursor()
 
             # Consulta para obtener los registros con paginación
-            cursor.execute(f"SELECT * FROM {tabla} LIMIT %s OFFSET %s", (page_size, offset))
-            resultados = cursor.fetchall()
+            if tabla in tablas_con_paginacion:
+                cursor.execute(f"SELECT * FROM {tabla} LIMIT %s OFFSET %s", (page_size, offset))
+                resultados = cursor.fetchall()
 
-            # Consulta para contar el número total de registros en la tabla
-            cursor.execute(f"SELECT COUNT(*) FROM {tabla}")
-            total_registros = cursor.fetchone()[0]  # Total de registros en la tabla
+                # Consulta para contar el número total de registros en la tabla
+                cursor.execute(f"SELECT COUNT(*) FROM {tabla}")
+                total_registros = cursor.fetchone()[0]  # Total de registros en la tabla
 
-            if resultados:
-                # Convertir los resultados a un formato JSON serializable
+                if resultados:
+                    # Convertir los resultados a un formato JSON serializable
+                    serializable_resultados = convertir_a_serializable(cursor, resultados)
+                    cursor.close()
+                    conexion.close()
+
+                    # Devolver los datos paginados y metadatos adicionales como página, tamaño y total
+                    return jsonify({
+                        'page': page,
+                        'page_size': page_size,
+                        'total_registros': total_registros,
+                        'total_paginas': (total_registros + page_size - 1) // page_size,  # Calcular total de páginas
+                        'data': serializable_resultados
+                    })
+                else:
+                    cursor.close()
+                    conexion.close()
+                    return f"No hay registros en la tabla {tabla}", 200
+            else:
+                # Si la tabla no necesita paginación, simplemente selecciona todo
+                cursor.execute(f"SELECT * FROM {tabla}")
+                resultados = cursor.fetchall()
                 serializable_resultados = convertir_a_serializable(cursor, resultados)
                 cursor.close()
                 conexion.close()
 
-                # Devolver los datos paginados y metadatos adicionales como página, tamaño y total
-                return jsonify({
-                    'page': page,
-                    'page_size': page_size,
-                    'total_registros': total_registros,
-                    'total_paginas': (total_registros + page_size - 1) // page_size,  # Calcular total de páginas
-                    'data': serializable_resultados
-                })
-            else:
-                cursor.close()
-                conexion.close()
-                return f"No hay registros en la tabla {tabla}", 200
+                return jsonify({'data': serializable_resultados}), 200
     except Error as e:
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
@@ -150,7 +163,6 @@ def mostrar_usuarios():
 def detalles_usuarios(id):
     return obtener_detalles_por_id('Usuarios', id)
 
-
 # Función para verificar si un usuario es administrador
 def es_administrador(user_id):
     try:
@@ -230,75 +242,5 @@ def eliminar_publicacion(id):
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
 
-# Ruta para crear un usuario en la tabla Usuarios, verificando que el correo no exista
-@app.route('/usuarios', methods=['POST'])
-def crear_usuario():
-    datos = request.json
-    nombre = datos.get('nombre')
-    correo = datos.get('correo')
-    contraseña = datos.get('contraseña')
-
-    if not (nombre and correo and contraseña):
-        return jsonify({'error': 'Faltan datos para crear el usuario'}), 400
-
-    try:
-        conexion = conectar_bd()
-        if conexion.is_connected():
-            cursor = conexion.cursor()
-
-            # Verificar si el correo ya existe
-            cursor.execute("SELECT id FROM Usuarios WHERE correo = %s", (correo,))
-            usuario_existente = cursor.fetchone()
-            
-            if usuario_existente:
-                cursor.close()
-                conexion.close()
-                return jsonify({'error': 'El correo ya está en uso'}), 409
-
-            # Si el correo no existe, crear el usuario
-            cursor.execute(
-                "INSERT INTO Usuarios (nombre, correo, contraseña) VALUES (%s, %s, %s)",
-                (nombre, correo, contraseña)
-            )
-            conexion.commit()
-            nuevo_id = cursor.lastrowid
-            cursor.close()
-            conexion.close()
-            return jsonify({'mensaje': 'Usuario creado con éxito', 'id': nuevo_id}), 201
-    except Error as e:
-        return jsonify({'error': f"Error al conectar a la base de datos: {e}"}), 500
-    return jsonify({'error': 'Error inesperado'}), 500
-
-# Rutas para agregar registros en la tabla Publicaciones
-@app.route('/publicaciones', methods=['POST'])
-def crear_publicacion():
-    datos = request.json
-    titulo = datos.get('titulo')
-    contenido = datos.get('contenido')
-    autor_id = datos.get('autor_id')
-
-    if not (titulo and contenido and autor_id):
-        return "Faltan datos para crear la publicación", 400
-
-    try:
-        conexion = conectar_bd()
-        if conexion.is_connected():
-            cursor = conexion.cursor()
-            cursor.execute(
-                "INSERT INTO Publicaciones (titulo, contenido, autor_id) VALUES (%s, %s, %s)",
-                (titulo, contenido, autor_id)
-            )
-            conexion.commit()
-            nueva_id = cursor.lastrowid
-            cursor.close()
-            conexion.close()
-            return jsonify({'mensaje': 'Publicación creada con éxito', 'id': nueva_id}), 201
-    except Error as e:
-        return f"Error al conectar a la base de datos: {e}", 500
-    return "Error inesperado", 500
-
-
-
-# Ejecutar la aplicación Flask
 if __name__ == '__main__':
     app.run(debug=True)
