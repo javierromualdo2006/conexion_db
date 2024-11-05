@@ -2,8 +2,101 @@ from flask import Flask, jsonify, request
 import mysql.connector
 from mysql.connector import Error
 from datetime import timedelta
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app) 
+
+
+
+@app.route('/comprar/<int:publicacion_id>', methods=['POST'])
+def comprar_publicacion(publicacion_id):
+    try:
+        # Obtener el id del usuario de los headers para identificar al comprador
+        user_id = request.headers.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Se requiere autenticación'}), 401
+        
+        # Conectar a la base de datos
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+
+            # Verificar si la publicación existe y obtener el id del producto y el stock
+            cursor.execute("SELECT producto_id, stock FROM Publicaciones WHERE id = %s", (publicacion_id,))
+            publicacion = cursor.fetchone()
+            if not publicacion:
+                cursor.close()
+                conexion.close()
+                return jsonify({'error': 'Publicación no encontrada'}), 404
+            
+            producto_id, stock = publicacion
+
+            # Verificar si hay stock disponible
+            if stock <= 0:
+                cursor.close()
+                conexion.close()
+                return jsonify({'error': 'No hay stock disponible para esta publicación'}), 400
+
+            # Insertar la compra en la tabla de compras (puedes ajustar los campos según tu base de datos)
+            cursor.execute("INSERT INTO Compras (user_id, publicacion_id) VALUES (%s, %s)", (user_id, publicacion_id))
+            conexion.commit()
+
+            # Actualizar el stock del producto asociado
+            nuevo_stock = stock - 1
+            cursor.execute("UPDATE Publicaciones SET stock = %s WHERE id = %s", (nuevo_stock, publicacion_id))
+            conexion.commit()
+
+            cursor.close()
+            conexion.close()
+            return jsonify({'mensaje': 'Compra realizada con éxito', 'nuevo_stock': nuevo_stock}), 200
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
+# Ruta para crear una nueva publicación
+@app.route('/publicaciones', methods=['POST'])
+def crear_publicacion():
+    datos = request.json
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            consulta = """
+                INSERT INTO Publicaciones (titulo, descripcion, precio, id_producto)
+                VALUES (%s, %s, %s, %s)
+            """
+            valores = (datos['titulo'], datos['descripcion'], datos['precio'], datos['id_producto'])
+            cursor.execute(consulta, valores)
+            conexion.commit()
+            cursor.close()
+            conexion.close()
+            return jsonify({'mensaje': 'Publicación creada con éxito'}), 201
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
+# Ruta para registrar un nuevo usuario
+@app.route('/usuarios', methods=['POST'])
+def registrar_usuario():
+    datos = request.json
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            consulta = """
+                INSERT INTO Usuarios (nombre, email, contraseña, rol)
+                VALUES (%s, %s, %s, %s)
+            """
+            valores = (datos['nombre'], datos['email'], datos['contraseña'], datos['rol'])
+            cursor.execute(consulta, valores)
+            conexion.commit()
+            cursor.close()
+            conexion.close()
+            return jsonify({'mensaje': 'Usuario registrado con éxito'}), 201
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
 
 # Función genérica para conectar a la base de datos
 def conectar_bd():
@@ -179,7 +272,7 @@ def eliminar_publicacion(id):
     return "Error inesperado", 500
 
 # Rutas para cada tabla con paginación
-tablas_con_paginacion = ['Publicaciones']
+tablas_con_paginacion = ['']
 
 @app.route('/compras')
 def mostrar_compras():
