@@ -7,7 +7,23 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app) 
 
+@app.route('/vista_publicaciones', methods=['GET'])
+def vista_publicaciones():
+   try:
+       conexion = conectar_bd()
+       cursor = conexion.cursor(dictionary=True)
+       cursor.execute("SELECT id_publicacion, titulo, descripcion, id_Productos, id_Usuarios, Imagen, Precio, Stock FROM vista_publicaciones")
+       publicaciones = cursor.fetchall()
+      
+       # Imprime los datos para verificar que contienen Precio y Stock
+       print(publicaciones)
 
+
+       cursor.close()
+       conexion.close()
+       return jsonify(publicaciones), 200
+   except Error as e:
+       return jsonify({"error": f"Error al obtener las publicaciones: {str(e)}"}), 500
 
 @app.route('/comprar/<int:publicacion_id>', methods=['POST'])
 def comprar_publicacion(publicacion_id):
