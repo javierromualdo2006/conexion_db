@@ -147,17 +147,20 @@ def es_administrador(user_id):
         conexion = conectar_bd()
         if conexion.is_connected():
             cursor = conexion.cursor()
-            cursor.execute("SELECT rol FROM Usuarios WHERE id = %s", (user_id,))
-            resultado = cursor.fetchone()
+            consulta = """
+SELECT * FROM Usuarios u JOIN UsuariosRoles ur ON ur.id_Usuario = u.id
+JOIN Roles r ON ur.id_Roles = r.id WHERE u.id = %s AND r.Nombre_Rol = "Administrador";
+"""
+            cursor.execute(consulta, (user_id,))
+            cursor.fetchall()
+            resultado = cursor.rowcount != 0
             cursor.close()
             conexion.close()
-
             # Suponemos que el rol 'administrador' está identificado como 'admin' en la columna `rol`
-            if resultado and resultado[0] == 'admin':
-                return True
+            return resultado
     except Error as e:
         print(f"Error al verificar el rol: {e}")
-    return False
+        return False
 
 # Función para obtener registros con paginación
 def obtener_todos_los_registros(tabla):
@@ -265,7 +268,8 @@ def eliminar_usuario(id):
 # Ruta para eliminar una publicación, solo accesible para administradores
 @app.route('/publicaciones/<int:id>', methods=['DELETE'])
 def eliminar_publicacion(id):
-    user_id = request.headers.get('user_id')
+    user_id = request.headers.get('User-Id')
+
     if not user_id or not es_administrador(user_id):
         return jsonify({'error': 'Acceso denegado: se requiere rol de administrador'}), 403
 
