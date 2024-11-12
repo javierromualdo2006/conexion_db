@@ -7,6 +7,18 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app) 
 
+# Función genérica para conectar a la base de datos
+def conectar_bd():
+    return mysql.connector.connect(
+        host="10.9.120.5",  # Cambia por la IP de tu servidor
+        port=3306,  # Puerto de MySQL
+        user="ropauba",  # Usuario
+        password="ropauba111",  # Contraseña
+        database="ropauba"  # Base de datos
+    )
+
+###############################################################################################################
+
 @app.route('/vista_publicaciones', methods=['GET'])
 def vista_publicaciones():
    try:
@@ -25,50 +37,66 @@ def vista_publicaciones():
    except Error as e:
        return jsonify({"error": f"Error al obtener las publicaciones: {str(e)}"}), 500
 
-@app.route('/comprar/<int:publicacion_id>', methods=['POST'])
-def comprar_publicacion(publicacion_id):
+################################################################################################################
+
+# Ruta para eliminar un usuario
+@app.route('/usuarios/<int:id>', methods=['DELETE'])
+def eliminar_usuario(id):
+    user_id = request.headers.get('user_id')
+
+    if not user_id:
+        return jsonify({'error': 'Se requiere autenticación'}), 401
+
+    if not es_administrador(user_id):
+        if int(user_id) != id:
+            return jsonify({'error': 'Acceso denegado: solo puedes eliminar tu propia cuenta'}), 403
+
     try:
-        # Obtener el id del usuario de los headers para identificar al comprador
-        user_id = request.headers.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Se requiere autenticación'}), 401
-        
-        # Conectar a la base de datos
         conexion = conectar_bd()
         if conexion.is_connected():
             cursor = conexion.cursor()
-
-            # Verificar si la publicación existe y obtener el id del producto y el stock
-            cursor.execute("SELECT producto_id, stock FROM Publicaciones WHERE id = %s", (publicacion_id,))
-            publicacion = cursor.fetchone()
-            if not publicacion:
-                cursor.close()
-                conexion.close()
-                return jsonify({'error': 'Publicación no encontrada'}), 404
-            
-            producto_id, stock = publicacion
-
-            # Verificar si hay stock disponible
-            if stock <= 0:
-                cursor.close()
-                conexion.close()
-                return jsonify({'error': 'No hay stock disponible para esta publicación'}), 400
-
-            # Insertar la compra en la tabla de compras (puedes ajustar los campos según tu base de datos)
-            cursor.execute("INSERT INTO Compras (user_id, publicacion_id) VALUES (%s, %s)", (user_id, publicacion_id))
+            cursor.execute("DELETE FROM Usuarios WHERE id = %s", (id,))
             conexion.commit()
-
-            # Actualizar el stock del producto asociado
-            nuevo_stock = stock - 1
-            cursor.execute("UPDATE Publicaciones SET stock = %s WHERE id = %s", (nuevo_stock, publicacion_id))
-            conexion.commit()
-
+            filas_afectadas = cursor.rowcount
             cursor.close()
             conexion.close()
-            return jsonify({'mensaje': 'Compra realizada con éxito', 'nuevo_stock': nuevo_stock}), 200
+
+            if filas_afectadas > 0:
+                return jsonify({'mensaje': 'Usuario eliminado con éxito'}), 200
+            else:
+                return f"No se encontró el usuario con ID {id}", 404
     except Error as e:
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
+
+# Ruta para eliminar una publicación, solo accesible para administradores
+@app.route('/publicaciones/<int:id>', methods=['DELETE'])
+def eliminar_publicacion(id):
+    user_id = request.headers.get('User-Id')
+
+    if not user_id or not es_administrador(user_id):
+        return jsonify({'error': 'Acceso denegado: se requiere rol de administrador'}), 403
+
+    try:
+        conexion = conectar_bd()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            cursor.execute("DELETE FROM Publicaciones WHERE id = %s", (id,))
+            conexion.commit()
+            filas_afectadas = cursor.rowcount
+            cursor.close()
+            conexion.close()
+
+            if filas_afectadas > 0:
+                return jsonify({'mensaje': 'Publicación eliminada con éxito'}), 200
+            else:
+                return f"No se encontró la publicación con ID {id}", 404
+    except Error as e:
+        return f"Error al conectar a la base de datos: {e}", 500
+    return "Error inesperado", 500
+
+###############################################################################################################
+
 
 # Ruta para crear una nueva publicación
 @app.route('/publicaciones', methods=['POST'])
@@ -114,15 +142,7 @@ def registrar_usuario():
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
 
-# Función genérica para conectar a la base de datos
-def conectar_bd():
-    return mysql.connector.connect(
-        host="10.9.120.5",  # Cambia por la IP de tu servidor
-        port=3306,  # Puerto de MySQL
-        user="ropauba",  # Usuario
-        password="ropauba111",  # Contraseña
-        database="ropauba"  # Base de datos
-    )
+################################################################################################################
 
 # Función para convertir los resultados a un formato JSON serializable
 def convertir_a_serializable(cursor, data):
@@ -235,61 +255,7 @@ def obtener_detalles_por_id(tabla, id):
         return f"Error al conectar a la base de datos: {e}", 500
     return "Error inesperado", 500
 
-# Ruta para eliminar un usuario
-@app.route('/usuarios/<int:id>', methods=['DELETE'])
-def eliminar_usuario(id):
-    user_id = request.headers.get('user_id')
-
-    if not user_id:
-        return jsonify({'error': 'Se requiere autenticación'}), 401
-
-    if not es_administrador(user_id):
-        if int(user_id) != id:
-            return jsonify({'error': 'Acceso denegado: solo puedes eliminar tu propia cuenta'}), 403
-
-    try:
-        conexion = conectar_bd()
-        if conexion.is_connected():
-            cursor = conexion.cursor()
-            cursor.execute("DELETE FROM Usuarios WHERE id = %s", (id,))
-            conexion.commit()
-            filas_afectadas = cursor.rowcount
-            cursor.close()
-            conexion.close()
-
-            if filas_afectadas > 0:
-                return jsonify({'mensaje': 'Usuario eliminado con éxito'}), 200
-            else:
-                return f"No se encontró el usuario con ID {id}", 404
-    except Error as e:
-        return f"Error al conectar a la base de datos: {e}", 500
-    return "Error inesperado", 500
-
-# Ruta para eliminar una publicación, solo accesible para administradores
-@app.route('/publicaciones/<int:id>', methods=['DELETE'])
-def eliminar_publicacion(id):
-    user_id = request.headers.get('User-Id')
-
-    if not user_id or not es_administrador(user_id):
-        return jsonify({'error': 'Acceso denegado: se requiere rol de administrador'}), 403
-
-    try:
-        conexion = conectar_bd()
-        if conexion.is_connected():
-            cursor = conexion.cursor()
-            cursor.execute("DELETE FROM Publicaciones WHERE id = %s", (id,))
-            conexion.commit()
-            filas_afectadas = cursor.rowcount
-            cursor.close()
-            conexion.close()
-
-            if filas_afectadas > 0:
-                return jsonify({'mensaje': 'Publicación eliminada con éxito'}), 200
-            else:
-                return f"No se encontró la publicación con ID {id}", 404
-    except Error as e:
-        return f"Error al conectar a la base de datos: {e}", 500
-    return "Error inesperado", 500
+###############################################################################################################
 
 # Rutas para cada tabla con paginación
 tablas_con_paginacion = ['']
