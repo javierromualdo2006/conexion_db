@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Vista Publicaciones</title>
+  </head>
+  <body>
+    <h1>Publicaciones</h1>
+    <ul>
+      {% for publicacion in publicaciones %}
+      <li>
+        {{ publicacion['titulo'] }} - {{ publicacion['descripcion'] }} - Precio:
+        {{ publicacion['Precio'] }} - Stock: {{ publicacion['Stock'] }}
+      </li>
+      {% endfor %}
+    </ul>
+  </body>
+</html>

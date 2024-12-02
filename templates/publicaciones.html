@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Publicaciones</title>
+  </head>
+  <body>
+    <h1>Lista de Publicaciones</h1>
+    <ul>
+      {% for publicacion in publicaciones %}
+      <li>{{ publicacion['titulo'] }} - {{ publicacion['descripcion'] }}</li>
+      {% endfor %}
+    </ul>
+  </body>
+</html>
